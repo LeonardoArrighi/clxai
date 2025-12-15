@@ -48,3 +48,8 @@ Thumbs.db
 # Temporary files
 *.tmp
 *.temp
+
+# Data files (download separately - too large for GitHub)
+data/*.tar.gz
+data/*.zip
+data/cifar-10-batches-py/
