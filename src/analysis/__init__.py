@@ -1,0 +1,3 @@
+from .embedding_analysis import EmbeddingAnalyzer, analyze_embedding_trajectory
+from .faithfulness import FaithfulnessEvaluator, compute_faithfulness_metrics
+from .visualization import plot_faithfulness_curves, plot_embedding_trajectory, create_trajectory_animation

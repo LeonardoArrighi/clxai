@@ -1,0 +1,50 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+*.egg
+.eggs/
+
+# Virtual environments
+clxai_env/
+venv/
+env/
+.venv/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Jupyter
+.ipynb_checkpoints/
+*.ipynb_checkpoints
+
+# Results and outputs (large files)
+results/checkpoints/
+results/embeddings/
+results/figures/
+*.pt
+*.pth
+*.ckpt
+
+# Logs
+logs/
+*.log
+slurm-*.out
+
+# WandB
+wandb/
+
+# System files
+.DS_Store
+Thumbs.db
+
+# Temporary files
+*.tmp
+*.temp

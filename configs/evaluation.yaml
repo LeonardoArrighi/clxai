@@ -1,0 +1,38 @@
+# XAI Evaluation Configuration
+
+models:
+  ce_baseline:
+    checkpoint: results/models/ce_baseline/best_model.pt
+    type: ce
+  scl_knn:
+    checkpoint: results/models/scl/best_model.pt
+    type: scl
+    classifier: knn
+    knn_k: 10
+  scl_linear:
+    checkpoint: results/models/scl/best_model.pt
+    type: scl
+    classifier: linear
+
+xai_methods:
+  - vanilla_grad
+  - integrated_grad
+  - gradcam
+  - deeplift
+
+perturbations:
+  - mean
+  - noise
+  - blur
+
+pixel_flipping:
+  n_steps: 20
+  n_samples: 1000
+
+embedding_analysis:
+  n_samples: 500
+  n_steps: 20
+
+output:
+  results_dir: results/evaluation
+  figures_dir: results/figures

@@ -1,0 +1,27 @@
+# CLXAI - Contrastive Learning for XAI Faithfulness Evaluation
+# Requirements for Leonardo HPC (builds on cineca-ai/4.3.0)
+
+# XAI Library
+captum>=0.7.0
+
+# Contrastive Learning
+pytorch-metric-learning>=2.3.0
+
+# Visualization
+umap-learn>=0.5.4
+matplotlib>=3.7.0
+seaborn>=0.12.0
+
+# Analysis
+scipy>=1.10.0
+pandas>=2.0.0
+
+# Progress bars
+tqdm>=4.65.0
+
+# Config management
+pyyaml>=6.0
+omegaconf>=2.3.0
+
+# Logging
+wandb>=0.15.0
