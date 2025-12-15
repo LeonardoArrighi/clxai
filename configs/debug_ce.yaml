@@ -1,0 +1,31 @@
+# Debug Cross-Entropy Training Config
+# Quick 10-epoch run for testing
+
+model:
+  architecture: resnet18
+  num_classes: 10
+
+training:
+  epochs: 10
+  batch_size: 512  # Large batch for A100
+  lr: 0.1
+  momentum: 0.9
+  weight_decay: 0.0005
+  
+  loss: ce
+
+data:
+  dataset: cifar10
+  data_dir: ./data
+  num_workers: 8
+  augment: true
+
+evaluation:
+  eval_freq: 2
+
+logging:
+  use_wandb: false
+  save_freq: 5
+
+output:
+  output_dir: results/models/debug/ce

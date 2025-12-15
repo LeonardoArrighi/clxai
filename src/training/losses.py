@@ -342,7 +342,9 @@ class TripletLoss(nn.Module):
         triplet_loss = triplet_loss[valid_anchors]
         
         if triplet_loss.numel() == 0:
-            return torch.tensor(0.0, device=device, requires_grad=True)
+            # Return zero loss connected to computation graph via embeddings
+            # This ensures gradients can flow back through the model
+            return (embeddings * 0).sum()
         
         return triplet_loss.mean()
     
@@ -434,7 +436,8 @@ class TripletLoss(nn.Module):
         num_positive_triplets = (triplet_loss > 1e-16).sum()
         
         if num_positive_triplets == 0:
-            return torch.tensor(0.0, device=device, requires_grad=True)
+            # Return zero loss connected to computation graph via embeddings
+            return (embeddings * 0).sum()
         
         # Average over positive triplets
         return triplet_loss.sum() / num_positive_triplets.float()

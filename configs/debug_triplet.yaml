@@ -1,0 +1,37 @@
+# Debug Triplet Loss Training Config
+# Quick 10-epoch run for testing
+
+model:
+  architecture: resnet18_encoder
+  embedding_dim: 128
+
+training:
+  epochs: 10
+  batch_size: 512  # Large batch for A100
+  lr: 0.1
+  momentum: 0.9
+  weight_decay: 0.0001
+  warmup_epochs: 2
+  
+  loss: triplet
+  triplet:
+    margin: 0.3
+    mining: hard  # Options: hard, semi-hard, all
+    squared: false
+
+data:
+  dataset: cifar10
+  data_dir: ./data
+  num_workers: 8
+  contrastive: false  # Triplet uses single view
+
+evaluation:
+  eval_freq: 2
+  knn_k: 10
+
+logging:
+  use_wandb: false
+  save_freq: 5
+
+output:
+  output_dir: results/models/debug/triplet
