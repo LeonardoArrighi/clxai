@@ -1,5 +1,5 @@
 """
-CIFAR-10 data loading utilities for CLXAI.
+CIFAR-10/100 data loading utilities for CLXAI.
 """
 
 import torch
@@ -13,10 +13,19 @@ from typing import Tuple, Optional
 CIFAR10_MEAN = (0.4914, 0.4822, 0.4465)
 CIFAR10_STD = (0.2470, 0.2435, 0.2616)
 
+# CIFAR-100 statistics
+CIFAR100_MEAN = (0.5071, 0.4867, 0.4408)
+CIFAR100_STD = (0.2675, 0.2565, 0.2761)
+
 
 def get_cifar10_stats() -> Tuple[Tuple[float, ...], Tuple[float, ...]]:
     """Return CIFAR-10 mean and std for normalization."""
     return CIFAR10_MEAN, CIFAR10_STD
+
+
+def get_cifar100_stats() -> Tuple[Tuple[float, ...], Tuple[float, ...]]:
+    """Return CIFAR-100 mean and std for normalization."""
+    return CIFAR100_MEAN, CIFAR100_STD
 
 
 def get_train_transforms(augment: bool = True) -> transforms.Compose:
@@ -107,17 +116,19 @@ def get_cifar10_loaders(
     
     test_transform = get_test_transforms()
     
+    # download=False since compute nodes have no internet
+    # Data must be pre-downloaded on login node
     train_dataset = torchvision.datasets.CIFAR10(
         root=data_dir,
         train=True,
-        download=True,
+        download=False,
         transform=train_transform
     )
     
     test_dataset = torchvision.datasets.CIFAR10(
         root=data_dir,
         train=False,
-        download=True,
+        download=False,
         transform=test_transform
     )
     
@@ -164,7 +175,7 @@ def get_raw_cifar10_loader(
     dataset = torchvision.datasets.CIFAR10(
         root=data_dir,
         train=train,
-        download=True,
+        download=False,  # Compute nodes have no internet
         transform=transform
     )
     
@@ -176,18 +187,23 @@ def get_raw_cifar10_loader(
     )
 
 
-def denormalize(tensor: torch.Tensor) -> torch.Tensor:
+def denormalize(tensor: torch.Tensor, dataset: str = 'cifar10') -> torch.Tensor:
     """
-    Denormalize a CIFAR-10 tensor back to [0, 1] range.
+    Denormalize a CIFAR tensor back to [0, 1] range.
     
     Args:
         tensor: Normalized tensor (C, H, W) or (B, C, H, W)
+        dataset: 'cifar10' or 'cifar100'
     
     Returns:
         Denormalized tensor in [0, 1] range
     """
-    mean = torch.tensor(CIFAR10_MEAN).view(3, 1, 1)
-    std = torch.tensor(CIFAR10_STD).view(3, 1, 1)
+    if dataset == 'cifar100':
+        mean = torch.tensor(CIFAR100_MEAN).view(3, 1, 1)
+        std = torch.tensor(CIFAR100_STD).view(3, 1, 1)
+    else:
+        mean = torch.tensor(CIFAR10_MEAN).view(3, 1, 1)
+        std = torch.tensor(CIFAR10_STD).view(3, 1, 1)
     
     if tensor.dim() == 4:
         mean = mean.unsqueeze(0)
@@ -199,8 +215,189 @@ def denormalize(tensor: torch.Tensor) -> torch.Tensor:
     return tensor * std + mean
 
 
+# ============================================================================
+# CIFAR-100 Functions
+# ============================================================================
+
+def get_cifar100_train_transforms(augment: bool = True) -> transforms.Compose:
+    """
+    Get training transforms for CIFAR-100.
+    
+    Args:
+        augment: Whether to apply data augmentation
+    
+    Returns:
+        Composed transforms
+    """
+    if augment:
+        return transforms.Compose([
+            transforms.RandomCrop(32, padding=4),
+            transforms.RandomHorizontalFlip(),
+            transforms.ToTensor(),
+            transforms.Normalize(CIFAR100_MEAN, CIFAR100_STD),
+        ])
+    else:
+        return transforms.Compose([
+            transforms.ToTensor(),
+            transforms.Normalize(CIFAR100_MEAN, CIFAR100_STD),
+        ])
+
+
+def get_cifar100_test_transforms() -> transforms.Compose:
+    """Get test/evaluation transforms for CIFAR-100."""
+    return transforms.Compose([
+        transforms.ToTensor(),
+        transforms.Normalize(CIFAR100_MEAN, CIFAR100_STD),
+    ])
+
+
+def get_cifar100_contrastive_transforms() -> transforms.Compose:
+    """
+    Get transforms for contrastive learning on CIFAR-100.
+    Returns two augmented views of each image.
+    """
+    return transforms.Compose([
+        transforms.RandomResizedCrop(32, scale=(0.2, 1.0)),
+        transforms.RandomHorizontalFlip(),
+        transforms.RandomApply([
+            transforms.ColorJitter(0.4, 0.4, 0.4, 0.1)
+        ], p=0.8),
+        transforms.RandomGrayscale(p=0.2),
+        transforms.ToTensor(),
+        transforms.Normalize(CIFAR100_MEAN, CIFAR100_STD),
+    ])
+
+
+def get_cifar100_loaders(
+    data_dir: str = './data',
+    batch_size: int = 128,
+    num_workers: int = 4,
+    augment: bool = True,
+    contrastive: bool = False,
+    pin_memory: bool = True,
+) -> Tuple[DataLoader, DataLoader]:
+    """
+    Get CIFAR-100 train and test data loaders.
+    
+    Args:
+        data_dir: Directory to store/load data
+        batch_size: Batch size
+        num_workers: Number of data loading workers
+        augment: Whether to apply data augmentation (for CE training)
+        contrastive: Whether to use contrastive transforms (for SCL training)
+        pin_memory: Whether to pin memory for faster GPU transfer
+    
+    Returns:
+        train_loader, test_loader
+    """
+    if contrastive:
+        train_transform = TwoCropTransform(get_cifar100_contrastive_transforms())
+    else:
+        train_transform = get_cifar100_train_transforms(augment=augment)
+    
+    test_transform = get_cifar100_test_transforms()
+    
+    # download=False since compute nodes have no internet
+    # Data must be pre-downloaded on login node
+    train_dataset = torchvision.datasets.CIFAR100(
+        root=data_dir,
+        train=True,
+        download=False,
+        transform=train_transform
+    )
+    
+    test_dataset = torchvision.datasets.CIFAR100(
+        root=data_dir,
+        train=False,
+        download=False,
+        transform=test_transform
+    )
+    
+    train_loader = DataLoader(
+        train_dataset,
+        batch_size=batch_size,
+        shuffle=True,
+        num_workers=num_workers,
+        pin_memory=pin_memory,
+        drop_last=True
+    )
+    
+    test_loader = DataLoader(
+        test_dataset,
+        batch_size=batch_size,
+        shuffle=False,
+        num_workers=num_workers,
+        pin_memory=pin_memory
+    )
+    
+    return train_loader, test_loader
+
+
+# ============================================================================
+# Generic Data Loading Functions
+# ============================================================================
+
+def get_data_loaders(
+    dataset: str = 'cifar10',
+    data_dir: str = './data',
+    batch_size: int = 128,
+    num_workers: int = 4,
+    augment: bool = True,
+    contrastive: bool = False,
+    pin_memory: bool = True,
+) -> Tuple[DataLoader, DataLoader]:
+    """
+    Generic function to get train and test data loaders.
+    
+    Args:
+        dataset: 'cifar10' or 'cifar100'
+        data_dir: Directory to store/load data
+        batch_size: Batch size
+        num_workers: Number of data loading workers
+        augment: Whether to apply data augmentation
+        contrastive: Whether to use contrastive transforms
+        pin_memory: Whether to pin memory for faster GPU transfer
+    
+    Returns:
+        train_loader, test_loader
+    """
+    if dataset == 'cifar10':
+        return get_cifar10_loaders(
+            data_dir=data_dir,
+            batch_size=batch_size,
+            num_workers=num_workers,
+            augment=augment,
+            contrastive=contrastive,
+            pin_memory=pin_memory
+        )
+    elif dataset == 'cifar100':
+        return get_cifar100_loaders(
+            data_dir=data_dir,
+            batch_size=batch_size,
+            num_workers=num_workers,
+            augment=augment,
+            contrastive=contrastive,
+            pin_memory=pin_memory
+        )
+    else:
+        raise ValueError(f"Unknown dataset: {dataset}. Use 'cifar10' or 'cifar100'.")
+
+
+def get_num_classes(dataset: str) -> int:
+    """Return the number of classes for a given dataset."""
+    if dataset == 'cifar10':
+        return 10
+    elif dataset == 'cifar100':
+        return 100
+    else:
+        raise ValueError(f"Unknown dataset: {dataset}")
+
+
 if __name__ == "__main__":
-    # Test data loading
+    print("=" * 50)
+    print("CIFAR-10 Data Loading")
+    print("=" * 50)
+    
     train_loader, test_loader = get_cifar10_loaders(batch_size=64)
     print(f"Train batches: {len(train_loader)}")
     print(f"Test batches: {len(test_loader)}")
@@ -208,8 +405,37 @@ if __name__ == "__main__":
     images, labels = next(iter(train_loader))
     print(f"Batch shape: {images.shape}")
     print(f"Labels shape: {labels.shape}")
+    print(f"Label range: {labels.min()} - {labels.max()}")
     
     # Test contrastive loader
     train_loader_cl, _ = get_cifar10_loaders(batch_size=64, contrastive=True)
     images, labels = next(iter(train_loader_cl))
     print(f"Contrastive batch: {len(images)} views, shape {images[0].shape}")
+    
+    print("\n" + "=" * 50)
+    print("CIFAR-100 Data Loading")
+    print("=" * 50)
+    
+    train_loader_100, test_loader_100 = get_cifar100_loaders(batch_size=64)
+    print(f"Train batches: {len(train_loader_100)}")
+    print(f"Test batches: {len(test_loader_100)}")
+    
+    images, labels = next(iter(train_loader_100))
+    print(f"Batch shape: {images.shape}")
+    print(f"Labels shape: {labels.shape}")
+    print(f"Label range: {labels.min()} - {labels.max()}")
+    
+    # Test contrastive loader
+    train_loader_cl_100, _ = get_cifar100_loaders(batch_size=64, contrastive=True)
+    images, labels = next(iter(train_loader_cl_100))
+    print(f"Contrastive batch: {len(images)} views, shape {images[0].shape}")
+    
+    print("\n" + "=" * 50)
+    print("Generic get_data_loaders()")
+    print("=" * 50)
+    train_loader, test_loader = get_data_loaders(dataset='cifar10', batch_size=64)
+    print(f"CIFAR-10 via generic: {len(train_loader)} train batches")
+    train_loader, test_loader = get_data_loaders(dataset='cifar100', batch_size=64)
+    print(f"CIFAR-100 via generic: {len(train_loader)} train batches")
+    print(f"CIFAR-10 classes: {get_num_classes('cifar10')}")
+    print(f"CIFAR-100 classes: {get_num_classes('cifar100')}")

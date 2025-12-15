@@ -1,11 +1,13 @@
 """
-Supervised Contrastive Learning training for ResNet-18 on CIFAR-10.
+Supervised Contrastive Learning training for ResNet on CIFAR-10/100.
+Supports ResNet-18 and ResNet-152 architectures with SupCon and Triplet loss.
 """
 
 import os
 import sys
 import argparse
 import time
+import random
 from pathlib import Path
 
 import torch
@@ -18,10 +20,10 @@ import yaml
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
-from src.models.resnet import ResNet18Encoder
+from src.models.resnet import get_model
 from src.models.classifiers import KNNClassifier, LinearClassifier, train_linear_classifier
-from src.training.losses import SupConLossV2
-from src.utils.data import get_cifar10_loaders
+from src.training.losses import SupConLossV2, TripletLoss
+from src.utils.data import get_data_loaders, get_num_classes
 
 try:
     import wandb
@@ -30,30 +32,46 @@ except ImportError:
     WANDB_AVAILABLE = False
 
 
+def set_seed(seed: int):
+    """Set random seed for reproducibility."""
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
+
+
 def train_epoch_scl(
     model: nn.Module,
     train_loader,
     criterion: nn.Module,
     optimizer: optim.Optimizer,
     device: torch.device,
-    epoch: int
+    epoch: int,
+    loss_type: str = 'supcon'
 ) -> dict:
-    """Train for one epoch with contrastive loss."""
+    """Train for one epoch with contrastive/metric loss."""
     model.train()
     total_loss = 0.0
     
     pbar = tqdm(train_loader, desc=f"Epoch {epoch}")
     for images, labels in pbar:
-        # images is a list of two augmented views
-        images = torch.cat([images[0], images[1]], dim=0).to(device)
+        # Handle different data formats
+        if isinstance(images, list):
+            # SupCon: images is a list of two augmented views
+            images = torch.cat([images[0], images[1]], dim=0).to(device)
+        else:
+            # Triplet: images is a single tensor
+            images = images.to(device)
         labels = labels.to(device)
         
         optimizer.zero_grad()
         
-        # Get embeddings for both views
-        embeddings = model(images)  # (2B, D)
+        # Get embeddings
+        embeddings = model(images)
         
-        # Compute contrastive loss
+        # Compute loss
         loss = criterion(embeddings, labels)
         
         loss.backward()
@@ -118,8 +136,21 @@ def train_scl_model(config: dict):
     """
     Main training function for SCL model.
     """
+    # Set seed for reproducibility
+    seed = config.get('seed', 42)
+    set_seed(seed)
+    print(f"Using seed: {seed}")
+    
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     print(f"Using device: {device}")
+    
+    # Get dataset and architecture from config
+    dataset = config.get('dataset', 'cifar10')
+    architecture = config.get('architecture', 'resnet18')
+    num_classes = get_num_classes(dataset)
+    
+    print(f"Dataset: {dataset} ({num_classes} classes)")
+    print(f"Architecture: {architecture}")
     
     output_dir = Path(config.get('output_dir', 'results/models/scl'))
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -131,16 +162,24 @@ def train_scl_model(config: dict):
             config=config
         )
     
-    # Data loaders - contrastive mode
-    train_loader_cl, test_loader = get_cifar10_loaders(
+    # Determine loss type
+    loss_type = config.get('loss', 'supcon')
+    use_contrastive_loader = loss_type == 'supcon'
+    print(f"Using loss: {loss_type}")
+    
+    # Data loaders - contrastive mode for SupCon, single view for Triplet
+    train_loader_cl, test_loader = get_data_loaders(
+        dataset=dataset,
         data_dir=config.get('data_dir', './data'),
         batch_size=config.get('batch_size', 256),
         num_workers=config.get('num_workers', 4),
-        contrastive=True
+        contrastive=use_contrastive_loader,
+        augment=True  # Always augment for training
     )
     
     # Regular loader for k-NN evaluation
-    train_loader_eval, _ = get_cifar10_loaders(
+    train_loader_eval, _ = get_data_loaders(
+        dataset=dataset,
         data_dir=config.get('data_dir', './data'),
         batch_size=config.get('batch_size', 256),
         num_workers=config.get('num_workers', 4),
@@ -148,14 +187,31 @@ def train_scl_model(config: dict):
         augment=False
     )
     
-    # Model
-    model = ResNet18Encoder(
+    # Model - encoder only for contrastive learning
+    model = get_model(
+        architecture=architecture,
+        num_classes=num_classes,
+        encoder_only=True,
         embedding_dim=config.get('embedding_dim', 128)
     ).to(device)
-    print(f"Model parameters: {sum(p.numel() for p in model.parameters()):,}")
     
-    # Loss
-    criterion = SupConLossV2(temperature=config.get('temperature', 0.07))
+    # Get feature dimension based on architecture
+    feature_dim = model.feature_dim if hasattr(model, 'feature_dim') else 512
+    print(f"Model parameters: {sum(p.numel() for p in model.parameters()):,}")
+    print(f"Feature dimension: {feature_dim}")
+    
+    # Loss - select based on config
+    if loss_type == 'supcon':
+        criterion = SupConLossV2(temperature=config.get('temperature', 0.07))
+    elif loss_type == 'triplet':
+        triplet_config = config.get('triplet', {})
+        criterion = TripletLoss(
+            margin=triplet_config.get('margin', 0.3),
+            mining=triplet_config.get('mining', 'hard'),
+            squared=triplet_config.get('squared', False)
+        )
+    else:
+        raise ValueError(f"Unknown loss type: {loss_type}")
     
     # Optimizer - SupCon paper uses LARS, we use SGD for simplicity
     optimizer = optim.SGD(
@@ -183,9 +239,9 @@ def train_scl_model(config: dict):
     start_time = time.time()
     
     for epoch in range(1, epochs + 1):
-        # Train with contrastive loss
+        # Train with contrastive/metric loss
         train_metrics = train_epoch_scl(
-            model, train_loader_cl, criterion, optimizer, device, epoch
+            model, train_loader_cl, criterion, optimizer, device, epoch, loss_type
         )
         
         scheduler.step()
@@ -241,7 +297,8 @@ def train_scl_model(config: dict):
     train_emb, train_labels = extract_embeddings(model, train_loader_eval, device)
     test_emb, test_labels = extract_embeddings(model, test_loader, device)
     
-    linear_clf = LinearClassifier(input_dim=512, num_classes=10)
+    # Use correct feature dimension and number of classes
+    linear_clf = LinearClassifier(input_dim=feature_dim, num_classes=num_classes)
     history = train_linear_classifier(
         linear_clf,
         torch.tensor(train_emb, dtype=torch.float32),
@@ -269,29 +326,79 @@ def train_scl_model(config: dict):
 
 
 def main():
-    parser = argparse.ArgumentParser(description='Train SCL ResNet-18 on CIFAR-10')
+    parser = argparse.ArgumentParser(description='Train SCL/Triplet ResNet on CIFAR-10/100')
     parser.add_argument('--config', type=str, default=None)
+    parser.add_argument('--dataset', type=str, default='cifar10', choices=['cifar10', 'cifar100'],
+                        help='Dataset to use')
+    parser.add_argument('--architecture', type=str, default='resnet18', choices=['resnet18', 'resnet152'],
+                        help='Model architecture')
     parser.add_argument('--epochs', type=int, default=500)
     parser.add_argument('--batch_size', type=int, default=256)
     parser.add_argument('--lr', type=float, default=0.5)
-    parser.add_argument('--temperature', type=float, default=0.07)
+    parser.add_argument('--temperature', type=float, default=0.07, help='Temperature for SupCon loss')
+    parser.add_argument('--loss', type=str, default='supcon', choices=['supcon', 'triplet'],
+                        help='Loss type: supcon or triplet')
+    parser.add_argument('--margin', type=float, default=0.3, help='Margin for triplet loss')
+    parser.add_argument('--mining', type=str, default='hard', choices=['hard', 'semi-hard', 'all'],
+                        help='Mining strategy for triplet loss')
     parser.add_argument('--data_dir', type=str, default='./data')
     parser.add_argument('--output_dir', type=str, default='results/models/scl')
     parser.add_argument('--no_wandb', action='store_true')
     parser.add_argument('--run_name', type=str, default='scl_supcon')
+    parser.add_argument('--seed', type=int, default=42, help='Random seed for reproducibility')
     args = parser.parse_args()
     
     if args.config and Path(args.config).exists():
         with open(args.config, 'r') as f:
             config = yaml.safe_load(f)
+        # Flatten nested config sections
+        if 'model' in config:
+            config['architecture'] = config['model'].get('architecture', 'resnet18')
+            config['embedding_dim'] = config['model'].get('embedding_dim', 128)
+        if 'training' in config:
+            for k, v in config['training'].items():
+                config[k] = v
+        if 'data' in config:
+            for k, v in config['data'].items():
+                config[k] = v
+        if 'evaluation' in config:
+            for k, v in config['evaluation'].items():
+                config[k] = v
+        if 'logging' in config:
+            for k, v in config['logging'].items():
+                config[k] = v
+        if 'output' in config:
+            for k, v in config['output'].items():
+                config[k] = v
+        # Override with command line args if provided
+        if args.seed != 42:
+            config['seed'] = args.seed
+        if args.output_dir != 'results/models/scl':
+            config['output_dir'] = args.output_dir
+        if args.run_name != 'scl_supcon':
+            config['run_name'] = args.run_name
+        if args.loss != 'supcon':
+            config['loss'] = args.loss
+        if args.dataset != 'cifar10':
+            config['dataset'] = args.dataset
+        if args.architecture != 'resnet18':
+            config['architecture'] = args.architecture
     else:
         config = {
+            'dataset': args.dataset,
+            'architecture': args.architecture,
             'epochs': args.epochs,
             'batch_size': args.batch_size,
             'lr': args.lr,
             'momentum': 0.9,
             'weight_decay': 1e-4,
             'temperature': args.temperature,
+            'loss': args.loss,
+            'triplet': {
+                'margin': args.margin,
+                'mining': args.mining,
+                'squared': False
+            },
             'embedding_dim': 128,
             'data_dir': args.data_dir,
             'output_dir': args.output_dir,
@@ -302,7 +409,8 @@ def main():
             'save_freq': 100,
             'eval_freq': 10,
             'warmup_epochs': 10,
-            'knn_k': 10
+            'knn_k': 10,
+            'seed': args.seed
         }
     
     train_scl_model(config)

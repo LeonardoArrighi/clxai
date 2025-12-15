@@ -1,0 +1,41 @@
+# Triplet Loss Configuration - CIFAR-100 + ResNet-152
+# Scalability experiment: larger model + larger dataset
+# Based on FaceNet paper with hard negative mining
+
+model:
+  architecture: resnet152
+  embedding_dim: 128
+
+training:
+  epochs: 500
+  batch_size: 256
+  lr: 0.1
+  momentum: 0.9
+  weight_decay: 0.0001
+  warmup_epochs: 10
+  
+  # Triplet loss specific parameters
+  loss: triplet
+  triplet:
+    margin: 0.3
+    mining: hard  # Options: 'hard', 'semi-hard', 'all'
+    squared: false  # Use Euclidean distance (not squared)
+
+data:
+  dataset: cifar100
+  data_dir: ./data
+  num_workers: 8
+  contrastive: false  # Triplet loss uses single view per sample
+
+evaluation:
+  eval_freq: 10
+  knn_k: 10
+
+logging:
+  use_wandb: true
+  wandb_project: clxai
+  run_name: triplet_cifar100_r152
+  save_freq: 100
+
+output:
+  output_dir: results/models/cifar100_r152/triplet

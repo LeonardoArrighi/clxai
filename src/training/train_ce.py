@@ -1,13 +1,16 @@
 """
-Cross-Entropy training for ResNet-18 on CIFAR-10.
+Cross-Entropy training for ResNet on CIFAR-10/100.
+Supports ResNet-18 and ResNet-152 architectures.
 """
 
 import os
 import sys
 import argparse
 import time
+import random
 from pathlib import Path
 
+import numpy as np
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -18,14 +21,24 @@ import yaml
 # Add project root to path
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
-from src.models.resnet import ResNet18
-from src.utils.data import get_cifar10_loaders
+from src.models.resnet import get_model
+from src.utils.data import get_data_loaders, get_num_classes
 
 try:
     import wandb
     WANDB_AVAILABLE = True
 except ImportError:
     WANDB_AVAILABLE = False
+
+
+def set_seed(seed: int):
+    """Set random seed for reproducibility."""
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
 
 
 def train_epoch(
@@ -104,9 +117,22 @@ def train_ce_model(config: dict):
     Args:
         config: Training configuration dictionary
     """
+    # Set seed for reproducibility
+    seed = config.get('seed', 42)
+    set_seed(seed)
+    print(f"Using seed: {seed}")
+    
     # Setup device
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     print(f"Using device: {device}")
+    
+    # Get dataset and architecture from config
+    dataset = config.get('dataset', 'cifar10')
+    architecture = config.get('architecture', 'resnet18')
+    num_classes = get_num_classes(dataset)
+    
+    print(f"Dataset: {dataset} ({num_classes} classes)")
+    print(f"Architecture: {architecture}")
     
     # Create output directory
     output_dir = Path(config.get('output_dir', 'results/models/ce_baseline'))
@@ -121,7 +147,8 @@ def train_ce_model(config: dict):
         )
     
     # Data loaders
-    train_loader, test_loader = get_cifar10_loaders(
+    train_loader, test_loader = get_data_loaders(
+        dataset=dataset,
         data_dir=config.get('data_dir', './data'),
         batch_size=config.get('batch_size', 128),
         num_workers=config.get('num_workers', 4),
@@ -129,7 +156,11 @@ def train_ce_model(config: dict):
     )
     
     # Model
-    model = ResNet18(num_classes=10).to(device)
+    model = get_model(
+        architecture=architecture,
+        num_classes=num_classes,
+        encoder_only=False
+    ).to(device)
     print(f"Model parameters: {sum(p.numel() for p in model.parameters()):,}")
     
     # Loss and optimizer
@@ -210,8 +241,12 @@ def train_ce_model(config: dict):
 
 
 def main():
-    parser = argparse.ArgumentParser(description='Train CE ResNet-18 on CIFAR-10')
+    parser = argparse.ArgumentParser(description='Train CE ResNet on CIFAR-10/100')
     parser.add_argument('--config', type=str, default=None, help='Config file path')
+    parser.add_argument('--dataset', type=str, default='cifar10', choices=['cifar10', 'cifar100'],
+                        help='Dataset to use')
+    parser.add_argument('--architecture', type=str, default='resnet18', choices=['resnet18', 'resnet152'],
+                        help='Model architecture')
     parser.add_argument('--epochs', type=int, default=200)
     parser.add_argument('--batch_size', type=int, default=128)
     parser.add_argument('--lr', type=float, default=0.1)
@@ -219,14 +254,44 @@ def main():
     parser.add_argument('--output_dir', type=str, default='results/models/ce_baseline')
     parser.add_argument('--no_wandb', action='store_true')
     parser.add_argument('--run_name', type=str, default='ce_baseline')
+    parser.add_argument('--seed', type=int, default=42, help='Random seed for reproducibility')
     args = parser.parse_args()
     
     # Load config from file or use defaults
     if args.config and Path(args.config).exists():
         with open(args.config, 'r') as f:
             config = yaml.safe_load(f)
+        # Flatten nested config sections
+        if 'model' in config:
+            config['architecture'] = config['model'].get('architecture', 'resnet18')
+            config['num_classes'] = config['model'].get('num_classes', 10)
+        if 'training' in config:
+            for k, v in config['training'].items():
+                config[k] = v
+        if 'data' in config:
+            for k, v in config['data'].items():
+                config[k] = v
+        if 'logging' in config:
+            for k, v in config['logging'].items():
+                config[k] = v
+        if 'output' in config:
+            for k, v in config['output'].items():
+                config[k] = v
+        # Override with command line args if provided
+        if args.seed != 42:
+            config['seed'] = args.seed
+        if args.output_dir != 'results/models/ce_baseline':
+            config['output_dir'] = args.output_dir
+        if args.run_name != 'ce_baseline':
+            config['run_name'] = args.run_name
+        if args.dataset != 'cifar10':
+            config['dataset'] = args.dataset
+        if args.architecture != 'resnet18':
+            config['architecture'] = args.architecture
     else:
         config = {
+            'dataset': args.dataset,
+            'architecture': args.architecture,
             'epochs': args.epochs,
             'batch_size': args.batch_size,
             'lr': args.lr,
@@ -238,7 +303,8 @@ def main():
             'run_name': args.run_name,
             'wandb_project': 'clxai',
             'num_workers': 4,
-            'save_freq': 50
+            'save_freq': 50,
+            'seed': args.seed
         }
     
     train_ce_model(config)
