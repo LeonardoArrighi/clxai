@@ -94,6 +94,7 @@ def get_cifar10_loaders(
     augment: bool = True,
     contrastive: bool = False,
     pin_memory: bool = True,
+    download: bool = False,
 ) -> Tuple[DataLoader, DataLoader]:
     """
     Get CIFAR-10 train and test data loaders.
@@ -105,6 +106,7 @@ def get_cifar10_loaders(
         augment: Whether to apply data augmentation (for CE training)
         contrastive: Whether to use contrastive transforms (for SCL training)
         pin_memory: Whether to pin memory for faster GPU transfer
+        download: If the dataset has to be downloaded 
     
     Returns:
         train_loader, test_loader
@@ -121,14 +123,14 @@ def get_cifar10_loaders(
     train_dataset = torchvision.datasets.CIFAR10(
         root=data_dir,
         train=True,
-        download=False,
+        download=download,
         transform=train_transform
     )
     
     test_dataset = torchvision.datasets.CIFAR10(
         root=data_dir,
         train=False,
-        download=False,
+        download=download,
         transform=test_transform
     )
     
@@ -275,6 +277,7 @@ def get_cifar100_loaders(
     augment: bool = True,
     contrastive: bool = False,
     pin_memory: bool = True,
+    download: bool = False,
 ) -> Tuple[DataLoader, DataLoader]:
     """
     Get CIFAR-100 train and test data loaders.
@@ -286,6 +289,7 @@ def get_cifar100_loaders(
         augment: Whether to apply data augmentation (for CE training)
         contrastive: Whether to use contrastive transforms (for SCL training)
         pin_memory: Whether to pin memory for faster GPU transfer
+        download: If the dataset has to be downloaded 
     
     Returns:
         train_loader, test_loader
@@ -302,14 +306,14 @@ def get_cifar100_loaders(
     train_dataset = torchvision.datasets.CIFAR100(
         root=data_dir,
         train=True,
-        download=False,
+        download=download,
         transform=train_transform
     )
     
     test_dataset = torchvision.datasets.CIFAR100(
         root=data_dir,
         train=False,
-        download=False,
+        download=download,
         transform=test_transform
     )
     
@@ -345,6 +349,7 @@ def get_data_loaders(
     augment: bool = True,
     contrastive: bool = False,
     pin_memory: bool = True,
+    download: bool = False,
 ) -> Tuple[DataLoader, DataLoader]:
     """
     Generic function to get train and test data loaders.
@@ -357,6 +362,7 @@ def get_data_loaders(
         augment: Whether to apply data augmentation
         contrastive: Whether to use contrastive transforms
         pin_memory: Whether to pin memory for faster GPU transfer
+        download: If the dataset has to be downloaded 
     
     Returns:
         train_loader, test_loader
@@ -368,7 +374,8 @@ def get_data_loaders(
             num_workers=num_workers,
             augment=augment,
             contrastive=contrastive,
-            pin_memory=pin_memory
+            pin_memory=pin_memory,
+            download = download,
         )
     elif dataset == 'cifar100':
         return get_cifar100_loaders(
@@ -377,7 +384,8 @@ def get_data_loaders(
             num_workers=num_workers,
             augment=augment,
             contrastive=contrastive,
-            pin_memory=pin_memory
+            pin_memory=pin_memory,
+            download = download,
         )
     else:
         raise ValueError(f"Unknown dataset: {dataset}. Use 'cifar10' or 'cifar100'.")
